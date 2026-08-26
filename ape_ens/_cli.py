@@ -51,16 +51,24 @@ def registry_address_option(**kwargs):
     return click.option("--registry-address", **kwargs)
 
 
+def coin_type_option(**kwargs):
+    if "help" not in kwargs:
+        kwargs["help"] = "ENSIP-9/11 coin type for multichain resolution. Defaults to ETH (60)."
+
+    return click.option("--coin-type", type=int, default=None, **kwargs)
+
+
 @cli.command()
 @ape_cli_context(obj_type=ENSContext)
 @click.argument("name")
 @network_option(default=None)
 @registry_address_option()
-def resolve(cli_ctx, name, registry_address):
+@coin_type_option()
+def resolve(cli_ctx, name, registry_address, coin_type):
     """
     Resolve an ENS address.
     """
-    if address := cli_ctx.ens.resolve(name, registry_address=registry_address):
+    if address := cli_ctx.ens.resolve(name, registry_address=registry_address, coin_type=coin_type):
         click.echo(address)
     else:
         click.echo(f"Could not resolve ENS '{name}'.", err=True)
@@ -88,12 +96,28 @@ def name_cmd(cli_ctx, address, registry_address):
 @registry_address_option()
 def owner(cli_ctx, name, registry_address):
     """
-    Get the owner of an ENS domain.
+    Get the ENS registry owner of a domain.
     """
     if owner_address := cli_ctx.ens.owner(name, registry_address=registry_address):
         click.echo(owner_address)
     else:
         click.echo(f"No owner found for '{name}'.", err=True)
+
+
+@cli.command()
+@ape_cli_context(obj_type=ENSContext)
+@click.argument("name")
+@click.argument("key")
+@network_option(default=None)
+@registry_address_option()
+def text(cli_ctx, name, key, registry_address):
+    """
+    Get an ENS text record.
+    """
+    if value := cli_ctx.ens.get_text(name, key, registry_address=registry_address):
+        click.echo(value)
+    else:
+        click.echo(f"No text record '{key}' found for '{name}'.", err=True)
 
 
 @cli.command()

@@ -43,6 +43,8 @@ ethereum:
 
 Otherwise, the plugin should still work with Ape's defaults, using an RPC from the `evmchains` library.
 
+Forward resolution and text records go through web3.py's ENS client. **web3.py 7.16.0 or newer** is required so those reads use the [ENS Universal Resolver](https://docs.ens.domains/resolvers/universal) (ENSv2-ready). `ape.convert` and contract calls still resolve the ETH address (coin type 60).
+
 This plugin contains two primary features:
 
 - A conversion API implementation: this allows you to use ENS values in contract calls and transaction kwargs.
@@ -108,11 +110,25 @@ ape ens owner vitalik.eth
 # outputs: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
 ```
 
+`owner` is the ENS **registry** owner (`registry.owner(node)`), not the Universal Resolver path used by `resolve`. Wrapped names often show the Name Wrapper.
+
 Get the namehash of an ENS name:
 
 ```shell
 ape ens namehash foo.eth
 # outputs: 0xde9b09fd7c5f901e23a3f19fecc54828e9c848539801e86591bd9801b019f84f
+```
+
+Get a text record:
+
+```shell
+ape ens text vitalik.eth url
+```
+
+Resolve a non-ETH coin type (ENSIP-9/11). For EVM L2s this is `0x80000000 | chain_id`:
+
+```shell
+ape ens resolve vitalik.eth --coin-type 2147492101
 ```
 
 ### Using `ape-ens` as a library.
@@ -125,6 +141,11 @@ from ape_ens import ENS
 ens = ENS()
 vitalik = ens.resolve("vitalik.eth")
 print(vitalik)
+
+# Multichain (ENSIP-11): Base is 0x80000000 | 8453
+base_address = ens.resolve("vitalik.eth", coin_type=2147492101)
+print(ens.get_text("vitalik.eth", "description"))
+print(ens.get_text("vitalik.eth", "url"))
 ```
 
 ### Local registry
@@ -187,3 +208,5 @@ You can also switch the registry adhoc during CLI commands:
 ```shell
 ape ens resolve vitalik.eth --registry-address 0x123...311
 ```
+
+`registry_address` is the ENS **registry** contract. Forward `resolve()` and `get_text()` use the Universal Resolver and do not depend on that address. `owner()` still queries the configured registry.

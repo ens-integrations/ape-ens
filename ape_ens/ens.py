@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Optional
 from ape.exceptions import ProviderError
 from ape.logging import logger
 from ape.utils.basemodel import ManagerAccessMixin
+from ens.exceptions import ResolverNotFound
 from web3.exceptions import BadFunctionCallOutput, CannotHandleRequest, Web3RPCError
 from web3.main import ENS as Web3ENS
 
@@ -35,6 +36,11 @@ class ENS(ManagerAccessMixin):
     """
     An Ape wrapper around ENS functionality. Handles mainnet
     network connections when necessary.
+
+    Forward resolution (``resolve()``) and text records (``get_text()``)
+    use web3.py's ENS client. With web3.py >= 7.16.0, those reads go
+    through the ENS Universal Resolver (ENSv2-ready). ``owner()`` still
+    queries the ENS registry directly.
     """
 
     def __init__(self, backend: Optional["Web3ENS"] = None) -> None:
@@ -135,6 +141,16 @@ class ENS(ManagerAccessMixin):
         # Use default (most common).
         return self._mainnet_provider.web3.ens
 
+    def _get_backend(self, registry_address: Optional["AddressType"] = None) -> "Web3ENS":
+        if registry_address:
+            return self._create_web3_ens(registry_address=registry_address)
+
+        return self._web3_ens
+
+    @staticmethod
+    def _cache_key(name: str, coin_type: Optional[int] = None) -> str:
+        return name if coin_type is None else f"{name}:{coin_type}"
+
     def can_resolve(self, name: str) -> bool:
         """
         Returns ``True`` when ENS can resolve the name.
@@ -162,44 +178,53 @@ class ENS(ManagerAccessMixin):
         name: str,
         use_cache: Optional[bool] = None,
         registry_address: Optional["AddressType"] = None,
+        coin_type: Optional[int] = None,
     ) -> Optional["AddressType"]:
         """
         Resolve an ENS name.
+
+        With web3.py >= 7.16.0, this uses the ENS Universal Resolver.
+        Pass ``coin_type`` for ENSIP-9/11 multichain records (for example
+        ``0x80000000 | chain_id`` on EVM L2s). The default is ETH (coin type 60).
+        Conversion via ``ape.convert`` always uses the ETH address.
 
         Args:
             name (str): The name to resolve.
             use_cache (bool): Set to ``False`` to not use the in-memory cache.
             registry_address (Optional[AddressType]): Optionally, change the registry
               address.
+            coin_type (Optional[int]): Optionally, resolve a non-ETH coin type.
 
         Returns:
             AddressType | None
         """
-        ens = (
-            self._create_web3_ens(registry_address=registry_address)
-            if registry_address
-            else self._web3_ens
-        )
+        ens = self._get_backend(registry_address)
         if use_cache is None:
             # Use default from config.
             use_cache = self.config.use_cache
 
+        cache_key = self._cache_key(name, coin_type)
         if use_cache:
-            if address := self.local_registry.get(name):
+            if address := self.local_registry.get(cache_key):
                 return address
 
-            # Check config cache.
-            if address := self.config.registry.get(name):
-                self.local_registry[name] = address
-                return address
+            # Config registry is ETH-address mappings only.
+            if coin_type is None:
+                if address := self.config.registry.get(name):
+                    self.local_registry[cache_key] = address
+                    return address
 
         try:
-            address = ens.address(name)
+            address = (
+                ens.address(name, coin_type=coin_type)
+                if coin_type is not None
+                else ens.address(name)
+            )
         except (Web3RPCError, BadFunctionCallOutput) as err:
             raise MissingRegistryError(str(err))
 
         if use_cache and address is not None:
-            self.local_registry[name] = address
+            self.local_registry[cache_key] = address
 
         return address
 
@@ -216,18 +241,16 @@ class ENS(ManagerAccessMixin):
         Returns:
             str | None: The ENS name.
         """
-        ens = (
-            self._create_web3_ens(registry_address=registry_address)
-            if registry_address
-            else self._web3_ens
-        )
-        return ens.name(address)
+        return self._get_backend(registry_address).name(address)
 
     def owner(
         self, name: str, registry_address: Optional["AddressType"] = None
     ) -> Optional["AddressType"]:
         """
-        Get the owner of an ENS domain.
+        Get the ENS registry owner of a domain.
+
+        This is ``registry.owner(node)``, not the Universal Resolver path
+        used by ``resolve()``. Wrapped names typically show the Name Wrapper.
 
         Args:
             name (str): The ENS name to check.
@@ -236,12 +259,37 @@ class ENS(ManagerAccessMixin):
         Returns:
             AddressType | None
         """
-        ens = (
-            self._create_web3_ens(registry_address=registry_address)
-            if registry_address
-            else self._web3_ens
-        )
-        return ens.owner(name)
+        return self._get_backend(registry_address).owner(name)
+
+    def get_text(
+        self,
+        name: str,
+        key: str,
+        registry_address: Optional["AddressType"] = None,
+    ) -> Optional[str]:
+        """
+        Get a text record for an ENS name.
+
+        Uses the same Universal Resolver read path as ``resolve()``
+        (web3.py >= 7.16.0).
+
+        Args:
+            name (str): The ENS name.
+            key (str): The text record key (e.g. ``"description"``, ``"url"``,
+              ``"com.github"``).
+            registry_address (Optional[AddressType]): Optionally, change the registry.
+
+        Returns:
+            str | None: The record value, or ``None`` if unset.
+        """
+        try:
+            value = self._get_backend(registry_address).get_text(name, key)
+        except (Web3RPCError, BadFunctionCallOutput) as err:
+            raise MissingRegistryError(str(err))
+        except ResolverNotFound:
+            return None
+
+        return value or None
 
     def namehash(self, name: str) -> "HexBytes":
         """
