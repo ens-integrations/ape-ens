@@ -1,4 +1,4 @@
-from ens.exceptions import ResolverNotFound
+from ens.exceptions import ResolverNotFound  # type: ignore[import-untyped]
 
 from ape_ens.ens import ENS
 
@@ -20,6 +20,20 @@ def test_resolve_coin_type_does_not_use_eth_cache(ens, mock_web3_ens, address, v
     actual = ens.resolve("vitalik.eth", coin_type=BASE_COIN_TYPE)
     assert actual == vitalik
     mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=BASE_COIN_TYPE)
+
+
+def test_resolve_coin_type_60_matches_default_eth(ens, mock_web3_ens, address):
+    ens.local_registry["vitalik.eth"] = address
+    actual = ens.resolve("vitalik.eth", coin_type=60)
+    assert actual == address
+    mock_web3_ens.address.assert_not_called()
+    assert "vitalik.eth:60" not in ens.local_registry
+
+
+def test_resolve_coin_type_60_calls_default_address(ens, mock_web3_ens, vitalik):
+    actual = ens.resolve("vitalik.eth", coin_type=60, use_cache=False)
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth")
 
 
 def test_get_text(ens, mock_web3_ens):

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Optional
 from ape.exceptions import ProviderError
 from ape.logging import logger
 from ape.utils.basemodel import ManagerAccessMixin
-from ens.exceptions import ResolverNotFound
+from ens.exceptions import ResolverNotFound  # type: ignore[import-untyped]
 from web3.exceptions import BadFunctionCallOutput, CannotHandleRequest, Web3RPCError
 from web3.main import ENS as Web3ENS
 
@@ -149,7 +149,10 @@ class ENS(ManagerAccessMixin):
 
     @staticmethod
     def _cache_key(name: str, coin_type: Optional[int] = None) -> str:
-        return name if coin_type is None else f"{name}:{coin_type}"
+        # ENSIP-9: 60 is ETH, the same as omitting coin_type.
+        if coin_type in (None, 60):
+            return name
+        return f"{name}:{coin_type}"
 
     def can_resolve(self, name: str) -> bool:
         """
@@ -198,6 +201,10 @@ class ENS(ManagerAccessMixin):
         Returns:
             AddressType | None
         """
+        # ENSIP-9: coin type 60 is ETH, same as the default addr() path.
+        if coin_type == 60:
+            coin_type = None
+
         ens = self._get_backend(registry_address)
         if use_cache is None:
             # Use default from config.
