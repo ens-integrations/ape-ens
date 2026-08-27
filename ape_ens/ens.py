@@ -1,17 +1,25 @@
 from functools import cached_property
 from typing import TYPE_CHECKING, Optional
 
-from ape.exceptions import ProviderError
+from ape.exceptions import EcosystemNotFoundError, NetworkError, ProviderError
 from ape.logging import logger
 from ape.utils.basemodel import ManagerAccessMixin
 from ens.exceptions import ResolverNotFound  # type: ignore[import-untyped]
 from web3.exceptions import BadFunctionCallOutput, CannotHandleRequest, Web3RPCError
 from web3.main import ENS as Web3ENS
 
-from ape_ens.exceptions import MissingRegistryError
+from ape_ens.exceptions import (
+    AmbiguousNetworkError,
+    ApeENSException,
+    ConflictingResolveOptionsError,
+    LocalNetworkCoinTypeError,
+    MissingRegistryError,
+)
+from ape_ens.utils.coin_type import coin_type_from_chain_id
 from ape_ens.utils.namehash import namehash
 
 if TYPE_CHECKING:
+    from ape.api.networks import EcosystemAPI, NetworkAPI
     from ape.types import AddressType
     from ape_ethereum.provider import Web3Provider
     from hexbytes import HexBytes
@@ -182,6 +190,8 @@ class ENS(ManagerAccessMixin):
         use_cache: Optional[bool] = None,
         registry_address: Optional["AddressType"] = None,
         coin_type: Optional[int] = None,
+        ecosystem: Optional[str] = None,
+        network: Optional[str] = None,
     ) -> Optional["AddressType"]:
         """
         Resolve an ENS name.
@@ -191,16 +201,35 @@ class ENS(ManagerAccessMixin):
         ``0x80000000 | chain_id`` on EVM L2s). The default is ETH (coin type 60).
         Conversion via ``ape.convert`` always uses the ETH address.
 
+        Alternatively, pass Ape ``ecosystem`` / ``network`` names (for example
+        ``ecosystem="base", network="mainnet"``) to select the coin type.
+        These do not change which RPC is used for ENS (always Ethereum
+        mainnet) and are not inferred from the connected provider.
+
         Args:
             name (str): The name to resolve.
             use_cache (bool): Set to ``False`` to not use the in-memory cache.
             registry_address (Optional[AddressType]): Optionally, change the registry
               address.
             coin_type (Optional[int]): Optionally, resolve a non-ETH coin type.
+            ecosystem (Optional[str]): Ape ecosystem name for ENSIP-11 coin type.
+            network (Optional[str]): Ape network name for ENSIP-11 coin type.
+              May be ``"base"`` when that uniquely names an ecosystem, or
+              ``"base:mainnet"``.
 
         Returns:
             AddressType | None
         """
+        if coin_type is not None and (ecosystem is not None or network is not None):
+            raise ConflictingResolveOptionsError(
+                "Cannot pass coin_type together with ecosystem or network. "
+                "Use coin_type for a raw ENSIP-9/11 value, or ecosystem/network "
+                "for Ape chain names."
+            )
+
+        if ecosystem is not None or network is not None:
+            coin_type = self._coin_type_from_ape_network(ecosystem, network)
+
         # ENSIP-9: coin type 60 is ETH, same as the default addr() path.
         if coin_type == 60:
             coin_type = None
@@ -234,6 +263,124 @@ class ENS(ManagerAccessMixin):
             self.local_registry[cache_key] = address
 
         return address
+
+    def _coin_type_from_ape_network(
+        self,
+        ecosystem: Optional[str] = None,
+        network: Optional[str] = None,
+    ) -> int:
+        eco_name, net_name = self._parse_ape_network(ecosystem, network)
+        eco = self.network_manager.get_ecosystem(eco_name)
+        net = eco.get_network(net_name)
+        if net.is_local:
+            raise LocalNetworkCoinTypeError(
+                "Cannot derive an ENS coin type from Ape local networks. "
+                "Pass coin_type=60 (ETH) or a live ecosystem and network "
+                "such as ecosystem='ethereum', network='mainnet'."
+            )
+
+        return coin_type_from_chain_id(self._chain_id_for_ens(net))
+
+    def _parse_ape_network(
+        self,
+        ecosystem: Optional[str],
+        network: Optional[str],
+    ) -> tuple[str, str]:
+        if ecosystem is not None and network is not None:
+            return ecosystem, network
+
+        if ecosystem is not None:
+            eco = self.network_manager.get_ecosystem(ecosystem)
+            return eco.name, self._default_ens_network_name(eco)
+
+        if network is None:
+            raise AmbiguousNetworkError("Pass ecosystem and/or network to select a coin type.")
+
+        if ":" in network:
+            eco_part, net_part = network.split(":", 1)
+            if eco_part and net_part:
+                return eco_part, net_part
+
+        try:
+            eco = self.network_manager.get_ecosystem(network)
+        except EcosystemNotFoundError:
+            eco = None
+
+        if eco is not None:
+            return eco.name, self._default_ens_network_name(eco)
+
+        matches = self._match_network_name(network)
+        if len(matches) == 1:
+            return matches[0]
+
+        if len(matches) > 1:
+            options = ", ".join(f"{eco}:{net}" for eco, net in matches)
+            raise AmbiguousNetworkError(
+                f"network={network!r} is ambiguous ({options}). Pass ecosystem= as well."
+            )
+
+        raise ApeENSException(f"Unknown Ape ecosystem or network {network!r}.")
+
+    def _default_ens_network_name(self, ecosystem: "EcosystemAPI") -> str:
+        if "mainnet" in ecosystem.networks:
+            return "mainnet"
+
+        default = ecosystem.default_network_name
+        if default != "local":
+            return default
+
+        raise AmbiguousNetworkError(f"Specify network= for ecosystem '{ecosystem.name}'.")
+
+    def _match_network_name(self, network_name: str) -> list[tuple[str, str]]:
+        from evmchains import PUBLIC_CHAIN_META
+
+        variants = {
+            network_name,
+            network_name.replace("-", "_"),
+            network_name.replace("_", "-"),
+        }
+        matches: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add(eco: str, net: str) -> None:
+            key = (eco, net)
+            if key not in seen:
+                seen.add(key)
+                matches.append(key)
+
+        for eco_name, nets in PUBLIC_CHAIN_META.items():
+            for name in variants:
+                if name in nets:
+                    add(eco_name, name)
+
+        for eco_name in self.network_manager._plugin_ecosystems:
+            eco = self.network_manager.get_ecosystem(eco_name)
+            for name in variants:
+                if name in eco.networks:
+                    add(eco_name, name)
+
+        return matches
+
+    def _chain_id_for_ens(self, network: "NetworkAPI") -> int:
+        if network.is_fork:
+            parent_name = network.name.replace("-fork", "").replace("_fork", "")
+            try:
+                return network.ecosystem.get_network(parent_name).chain_id
+            except NetworkError:
+                try:
+                    return int(network.upstream_chain_id)  # type: ignore[attr-defined]
+                except (AttributeError, NetworkError, TypeError) as err:
+                    raise NetworkError(
+                        f"Unable to determine chain ID for "
+                        f"'{network.ecosystem.name}:{network.name}'."
+                    ) from err
+
+        try:
+            return network.chain_id
+        except NetworkError as err:
+            raise NetworkError(
+                f"Unable to determine chain ID for '{network.ecosystem.name}:{network.name}'."
+            ) from err
 
     def name(
         self, address: "AddressType", registry_address: Optional["AddressType"] = None

@@ -1,6 +1,13 @@
+import pytest
 from ens.exceptions import ResolverNotFound  # type: ignore[import-untyped]
 
 from ape_ens.ens import ENS
+from ape_ens.exceptions import (
+    AmbiguousNetworkError,
+    ApeENSException,
+    ConflictingResolveOptionsError,
+    LocalNetworkCoinTypeError,
+)
 
 BASE_COIN_TYPE = 2147492101  # 0x80000000 | 8453
 
@@ -34,6 +41,64 @@ def test_resolve_coin_type_60_calls_default_address(ens, mock_web3_ens, vitalik)
     actual = ens.resolve("vitalik.eth", coin_type=60, use_cache=False)
     assert actual == vitalik
     mock_web3_ens.address.assert_called_with("vitalik.eth")
+
+
+def test_resolve_ape_network_ethereum_mainnet(ens, mock_web3_ens, vitalik):
+    actual = ens.resolve("vitalik.eth", ecosystem="ethereum", network="mainnet", use_cache=False)
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth")
+
+
+def test_resolve_ape_network_base_mainnet(ens, mock_web3_ens, vitalik):
+    actual = ens.resolve("vitalik.eth", ecosystem="base", network="mainnet", use_cache=False)
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=BASE_COIN_TYPE)
+
+
+def test_resolve_ape_network_base_shorthand(ens, mock_web3_ens, vitalik):
+    actual = ens.resolve("vitalik.eth", network="base", use_cache=False)
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=BASE_COIN_TYPE)
+
+
+def test_resolve_ape_network_combined_choice(ens, mock_web3_ens, vitalik):
+    actual = ens.resolve("vitalik.eth", network="base:mainnet", use_cache=False)
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=BASE_COIN_TYPE)
+
+
+def test_resolve_ape_network_ecosystem_only_uses_mainnet(ens, mock_web3_ens, vitalik):
+    actual = ens.resolve("vitalik.eth", ecosystem="base", use_cache=False)
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=BASE_COIN_TYPE)
+
+
+def test_resolve_ape_network_mainnet_fork_uses_upstream_eth(ens, mock_web3_ens, vitalik):
+    actual = ens.resolve(
+        "vitalik.eth", ecosystem="ethereum", network="mainnet-fork", use_cache=False
+    )
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth")
+
+
+def test_resolve_rejects_coin_type_and_network(ens):
+    with pytest.raises(ConflictingResolveOptionsError):
+        ens.resolve("vitalik.eth", coin_type=60, ecosystem="base")
+
+
+def test_resolve_network_mainnet_is_ambiguous(ens):
+    with pytest.raises(AmbiguousNetworkError, match="ambiguous"):
+        ens.resolve("vitalik.eth", network="mainnet")
+
+
+def test_resolve_local_network_coin_type(ens):
+    with pytest.raises(LocalNetworkCoinTypeError):
+        ens.resolve("vitalik.eth", ecosystem="ethereum", network="local")
+
+
+def test_resolve_unknown_ape_network(ens):
+    with pytest.raises(ApeENSException, match="Unknown Ape ecosystem or network"):
+        ens.resolve("vitalik.eth", network="not-a-real-chain-xyz")
 
 
 def test_get_text(ens, mock_web3_ens):

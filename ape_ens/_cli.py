@@ -2,11 +2,12 @@ from functools import cached_property
 
 import click
 from ape.cli import ApeCliContextObject, ape_cli_context, network_option
-from ape.exceptions import ConversionError
+from ape.exceptions import ConversionError, NetworkError
 from ape.types.address import AddressType
 from eth_utils import to_hex
 
 from ape_ens.ens import ENS
+from ape_ens.exceptions import ApeENSException
 
 
 def create_ens() -> ENS:
@@ -58,17 +59,47 @@ def coin_type_option(**kwargs):
     return click.option("--coin-type", type=int, default=None, **kwargs)
 
 
+def ens_ecosystem_option(**kwargs):
+    if "help" not in kwargs:
+        kwargs["help"] = "Ape ecosystem for ENSIP-11 coin type (e.g. base)."
+
+    return click.option("--ens-ecosystem", default=None, **kwargs)
+
+
+def ens_network_option(**kwargs):
+    if "help" not in kwargs:
+        kwargs["help"] = (
+            "Ape network for ENSIP-11 coin type (e.g. mainnet or base:mainnet). "
+            "Not the same as --network, which selects the connected provider."
+        )
+
+    return click.option("--ens-network", default=None, **kwargs)
+
+
 @cli.command()
 @ape_cli_context(obj_type=ENSContext)
 @click.argument("name")
 @network_option(default=None)
 @registry_address_option()
 @coin_type_option()
-def resolve(cli_ctx, name, registry_address, coin_type):
+@ens_ecosystem_option()
+@ens_network_option()
+def resolve(cli_ctx, name, registry_address, coin_type, ens_ecosystem, ens_network):
     """
     Resolve an ENS address.
     """
-    if address := cli_ctx.ens.resolve(name, registry_address=registry_address, coin_type=coin_type):
+    try:
+        address = cli_ctx.ens.resolve(
+            name,
+            registry_address=registry_address,
+            coin_type=coin_type,
+            ecosystem=ens_ecosystem,
+            network=ens_network,
+        )
+    except (ApeENSException, NetworkError) as err:
+        raise click.UsageError(str(err)) from err
+
+    if address:
         click.echo(address)
     else:
         click.echo(f"Could not resolve ENS '{name}'.", err=True)

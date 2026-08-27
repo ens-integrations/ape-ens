@@ -131,6 +131,13 @@ Resolve a non-ETH coin type (ENSIP-9/11). For EVM L2s this is `0x80000000 | chai
 ape ens resolve vitalik.eth --coin-type 2147492101
 ```
 
+Or use Ape ecosystem/network names instead of a raw coin type. `--network` is still Ape's **provider** connection (`ethereum:mainnet:node`); it does not select the ENS coin type:
+
+```shell
+ape ens resolve vitalik.eth --ens-ecosystem base --ens-network mainnet
+ape ens resolve vitalik.eth --ens-network base
+```
+
 ### Using `ape-ens` as a library.
 
 You can also use the `ape_ens.ENS` class directly for programmatically referring to ENS.
@@ -144,6 +151,9 @@ print(vitalik)
 
 # Multichain (ENSIP-11): Base is 0x80000000 | 8453
 base_address = ens.resolve("vitalik.eth", coin_type=2147492101)
+# Same coin type via Ape names (does not follow the connected provider)
+base_address = ens.resolve("vitalik.eth", ecosystem="base", network="mainnet")
+base_address = ens.resolve("vitalik.eth", network="base")
 print(ens.get_text("vitalik.eth", "description"))
 print(ens.get_text("vitalik.eth", "url"))
 ```

@@ -35,6 +35,13 @@ def test_convert(converter, vitalik):
     assert actual == vitalik
 
 
+def test_convert_always_uses_eth_coin_type(converter, mock_web3_ens, mocker):
+    spy = mocker.spy(converter.ens, "resolve")
+    converter.convert("vitalik.eth")
+    spy.assert_called_with("vitalik.eth")
+    mock_web3_ens.address.assert_called_with("vitalik.eth")
+
+
 def test_convert_when_connected_to_mainnet_fork(trick_network, converter, vitalik):
     trick_network("mainnet_fork")
     actual = converter.convert("vitalik.eth")
