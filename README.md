@@ -154,6 +154,8 @@ base_address = ens.resolve("vitalik.eth", coin_type=2147492101)
 # Same coin type via Ape names (does not follow the connected provider)
 base_address = ens.resolve("vitalik.eth", ecosystem="base", network="mainnet")
 base_address = ens.resolve("vitalik.eth", network="base")
+# Ethereum L1 testnets share coin type 60 (the ETH record), not ENSIP-11
+eth_address = ens.resolve("vitalik.eth", ecosystem="ethereum", network="sepolia")
 print(ens.get_text("vitalik.eth", "description"))
 print(ens.get_text("vitalik.eth", "url"))
 ```

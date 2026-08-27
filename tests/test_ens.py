@@ -10,6 +10,7 @@ from ape_ens.exceptions import (
 )
 
 BASE_COIN_TYPE = 2147492101  # 0x80000000 | 8453
+BASE_SEPOLIA_COIN_TYPE = 0x80000000 | 84532
 
 
 def test_resolve(ens, vitalik):
@@ -79,6 +80,18 @@ def test_resolve_ape_network_mainnet_fork_uses_upstream_eth(ens, mock_web3_ens, 
     )
     assert actual == vitalik
     mock_web3_ens.address.assert_called_with("vitalik.eth")
+
+
+def test_resolve_ape_network_ethereum_sepolia_uses_eth_coin_type(ens, mock_web3_ens, vitalik):
+    actual = ens.resolve("vitalik.eth", ecosystem="ethereum", network="sepolia", use_cache=False)
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth")
+
+
+def test_resolve_ape_network_base_sepolia_uses_ensip11(ens, mock_web3_ens, vitalik):
+    actual = ens.resolve("vitalik.eth", ecosystem="base", network="sepolia", use_cache=False)
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=BASE_SEPOLIA_COIN_TYPE)
 
 
 def test_resolve_rejects_coin_type_and_network(ens):

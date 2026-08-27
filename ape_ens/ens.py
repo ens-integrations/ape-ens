@@ -15,7 +15,7 @@ from ape_ens.exceptions import (
     LocalNetworkCoinTypeError,
     MissingRegistryError,
 )
-from ape_ens.utils.coin_type import coin_type_from_chain_id
+from ape_ens.utils.coin_type import ETH_COIN_TYPE, coin_type_from_chain_id
 from ape_ens.utils.namehash import namehash
 
 if TYPE_CHECKING:
@@ -199,7 +199,9 @@ class ENS(ManagerAccessMixin):
         With web3.py >= 7.16.0, this uses the ENS Universal Resolver.
         Pass ``coin_type`` for ENSIP-9/11 multichain records (for example
         ``0x80000000 | chain_id`` on EVM L2s). The default is ETH (coin type 60).
-        Conversion via ``ape.convert`` always uses the ETH address.
+        Ethereum L1 testnets (Sepolia, Holesky, …) also use coin type 60, not
+        an ENSIP-11 encoding of their chain ID. Conversion via ``ape.convert``
+        always uses the ETH address.
 
         Alternatively, pass Ape ``ecosystem`` / ``network`` names (for example
         ``ecosystem="base", network="mainnet"``) to select the coin type.
@@ -278,6 +280,10 @@ class ENS(ManagerAccessMixin):
                 "Pass coin_type=60 (ETH) or a live ecosystem and network "
                 "such as ecosystem='ethereum', network='mainnet'."
             )
+
+        # ENSIP-19: L1 testnets (Sepolia, Holesky, …) share coin type 60.
+        if eco.name == "ethereum":
+            return ETH_COIN_TYPE
 
         return coin_type_from_chain_id(self._chain_id_for_ens(net))
 
