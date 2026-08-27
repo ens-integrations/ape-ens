@@ -70,6 +70,7 @@ def ens_network_option(**kwargs):
     if "help" not in kwargs:
         kwargs["help"] = (
             "Ape network for ENSIP-11 coin type (e.g. mainnet or base:mainnet). "
+            "A trailing :provider is ignored. "
             "Not the same as --network, which selects the connected provider."
         )
 

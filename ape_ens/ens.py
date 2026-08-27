@@ -1,7 +1,7 @@
 from functools import cached_property
 from typing import TYPE_CHECKING, Optional
 
-from ape.exceptions import EcosystemNotFoundError, NetworkError, ProviderError
+from ape.exceptions import NetworkError, NetworkNotFoundError, ProviderError
 from ape.logging import logger
 from ape.utils.basemodel import ManagerAccessMixin
 from ens.exceptions import ResolverNotFound  # type: ignore[import-untyped]
@@ -14,6 +14,7 @@ from ape_ens.exceptions import (
     ConflictingResolveOptionsError,
     LocalNetworkCoinTypeError,
     MissingRegistryError,
+    UnknownNetworkError,
 )
 from ape_ens.utils.coin_type import ETH_COIN_TYPE, coin_type_from_chain_id
 from ape_ens.utils.namehash import namehash
@@ -216,8 +217,8 @@ class ENS(ManagerAccessMixin):
             coin_type (Optional[int]): Optionally, resolve a non-ETH coin type.
             ecosystem (Optional[str]): Ape ecosystem name for ENSIP-11 coin type.
             network (Optional[str]): Ape network name for ENSIP-11 coin type.
-              May be ``"base"`` when that uniquely names an ecosystem, or
-              ``"base:mainnet"``.
+              May be ``"base"`` when that uniquely names an ecosystem,
+              ``"base:mainnet"``, or ``"base:mainnet:node"`` (provider is ignored).
 
         Returns:
             AddressType | None
@@ -272,8 +273,8 @@ class ENS(ManagerAccessMixin):
         network: Optional[str] = None,
     ) -> int:
         eco_name, net_name = self._parse_ape_network(ecosystem, network)
-        eco = self.network_manager.get_ecosystem(eco_name)
-        net = eco.get_network(net_name)
+        eco = self._ape_ecosystem(eco_name)
+        net = self._ape_network(eco, net_name)
         if net.is_local:
             raise LocalNetworkCoinTypeError(
                 "Cannot derive an ENS coin type from Ape local networks. "
@@ -287,29 +288,36 @@ class ENS(ManagerAccessMixin):
 
         return coin_type_from_chain_id(self._chain_id_for_ens(net))
 
+    def _ape_ecosystem(self, name: str) -> "EcosystemAPI":
+        try:
+            return self.network_manager.get_ecosystem(name)
+        except NetworkError as err:
+            raise UnknownNetworkError(str(err)) from err
+
+    def _ape_network(self, ecosystem: "EcosystemAPI", name: str) -> "NetworkAPI":
+        try:
+            return ecosystem.get_network(name)
+        except NetworkError as err:
+            raise UnknownNetworkError(str(err)) from err
+
     def _parse_ape_network(
         self,
         ecosystem: Optional[str],
         network: Optional[str],
     ) -> tuple[str, str]:
-        if ecosystem is not None and network is not None:
-            return ecosystem, network
-
         if ecosystem is not None:
-            eco = self.network_manager.get_ecosystem(ecosystem)
-            return eco.name, self._default_ens_network_name(eco)
+            eco = self._ape_ecosystem(ecosystem)
+            if network is None:
+                return eco.name, self._default_ens_network_name(eco)
+            return eco.name, network
 
-        if network is None:
-            raise AmbiguousNetworkError("Pass ecosystem and/or network to select a coin type.")
-
-        if ":" in network:
-            eco_part, net_part = network.split(":", 1)
-            if eco_part and net_part:
-                return eco_part, net_part
+        assert network is not None
+        if choice := self._parse_network_choice(network):
+            return choice
 
         try:
             eco = self.network_manager.get_ecosystem(network)
-        except EcosystemNotFoundError:
+        except NetworkError:
             eco = None
 
         if eco is not None:
@@ -325,7 +333,21 @@ class ENS(ManagerAccessMixin):
                 f"network={network!r} is ambiguous ({options}). Pass ecosystem= as well."
             )
 
-        raise ApeENSException(f"Unknown Ape ecosystem or network {network!r}.")
+        raise UnknownNetworkError(f"Unknown Ape ecosystem or network {network!r}.")
+
+    @staticmethod
+    def _parse_network_choice(network: str) -> Optional[tuple[str, str]]:
+        """Split ``ecosystem:network`` or ``ecosystem:network:provider``.
+
+        The provider segment is ignored; coin type does not use an RPC.
+        """
+        if ":" not in network:
+            return None
+
+        parts = network.split(":")
+        if len(parts) >= 2 and parts[0] and parts[1]:
+            return parts[0], parts[1]
+        return None
 
     def _default_ens_network_name(self, ecosystem: "EcosystemAPI") -> str:
         if "mainnet" in ecosystem.networks:
@@ -338,53 +360,29 @@ class ENS(ManagerAccessMixin):
         raise AmbiguousNetworkError(f"Specify network= for ecosystem '{ecosystem.name}'.")
 
     def _match_network_name(self, network_name: str) -> list[tuple[str, str]]:
-        from evmchains import PUBLIC_CHAIN_META
-
-        variants = {
-            network_name,
-            network_name.replace("-", "_"),
-            network_name.replace("_", "-"),
-        }
         matches: list[tuple[str, str]] = []
         seen: set[tuple[str, str]] = set()
 
-        def add(eco: str, net: str) -> None:
-            key = (eco, net)
+        for eco in self.network_manager.ecosystems.values():
+            try:
+                net = eco.get_network(network_name)
+            except NetworkNotFoundError:
+                continue
+
+            key = (eco.name, net.name)
             if key not in seen:
                 seen.add(key)
                 matches.append(key)
 
-        for eco_name, nets in PUBLIC_CHAIN_META.items():
-            for name in variants:
-                if name in nets:
-                    add(eco_name, name)
-
-        for eco_name in self.network_manager._plugin_ecosystems:
-            eco = self.network_manager.get_ecosystem(eco_name)
-            for name in variants:
-                if name in eco.networks:
-                    add(eco_name, name)
-
         return matches
 
     def _chain_id_for_ens(self, network: "NetworkAPI") -> int:
-        if network.is_fork:
-            parent_name = network.name.replace("-fork", "").replace("_fork", "")
-            try:
-                return network.ecosystem.get_network(parent_name).chain_id
-            except NetworkError:
-                try:
-                    return int(network.upstream_chain_id)  # type: ignore[attr-defined]
-                except (AttributeError, NetworkError, TypeError) as err:
-                    raise NetworkError(
-                        f"Unable to determine chain ID for "
-                        f"'{network.ecosystem.name}:{network.name}'."
-                    ) from err
-
         try:
+            if network.is_fork:
+                return int(network.upstream_chain_id)  # type: ignore[attr-defined]
             return network.chain_id
-        except NetworkError as err:
-            raise NetworkError(
+        except (AttributeError, NetworkError, TypeError) as err:
+            raise ApeENSException(
                 f"Unable to determine chain ID for '{network.ecosystem.name}:{network.name}'."
             ) from err
 

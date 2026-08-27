@@ -62,6 +62,12 @@ def test_resolve_ens_network_shorthand(runner, mock_web3_ens):
     mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=2147492101)
 
 
+def test_resolve_ens_network_three_part_choice(runner, mock_web3_ens):
+    result = runner.invoke(cli, ["resolve", "vitalik.eth", "--ens-network", "base:mainnet:node"])
+    assert "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045" in result.output, result.output
+    mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=2147492101)
+
+
 def test_resolve_coin_type_and_ens_network_conflict(runner):
     result = runner.invoke(
         cli,

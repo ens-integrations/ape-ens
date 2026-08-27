@@ -25,6 +25,12 @@ class AmbiguousNetworkError(ApeENSException):
     """
 
 
+class UnknownNetworkError(ApeENSException):
+    """
+    Raised when an Ape ecosystem or network name cannot be resolved.
+    """
+
+
 class LocalNetworkCoinTypeError(ApeENSException):
     """
     Raised when mapping Ape local networks to an ENS coin type.

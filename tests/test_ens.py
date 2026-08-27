@@ -4,9 +4,9 @@ from ens.exceptions import ResolverNotFound  # type: ignore[import-untyped]
 from ape_ens.ens import ENS
 from ape_ens.exceptions import (
     AmbiguousNetworkError,
-    ApeENSException,
     ConflictingResolveOptionsError,
     LocalNetworkCoinTypeError,
+    UnknownNetworkError,
 )
 
 BASE_COIN_TYPE = 2147492101  # 0x80000000 | 8453
@@ -94,6 +94,26 @@ def test_resolve_ape_network_base_sepolia_uses_ensip11(ens, mock_web3_ens, vital
     mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=BASE_SEPOLIA_COIN_TYPE)
 
 
+def test_resolve_ape_network_three_part_choice_ignores_provider(ens, mock_web3_ens, vitalik):
+    actual = ens.resolve("vitalik.eth", network="base:mainnet:node", use_cache=False)
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=BASE_COIN_TYPE)
+
+
+def test_resolve_ape_network_base_mainnet_fork_uses_upstream(ens, mock_web3_ens, vitalik):
+    actual = ens.resolve("vitalik.eth", ecosystem="base", network="mainnet-fork", use_cache=False)
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=BASE_COIN_TYPE)
+
+
+def test_match_network_name_hyphen_underscore_are_aliases(ens):
+    hyphen = ens._match_network_name("mainnet-fork")
+    underscore = ens._match_network_name("mainnet_fork")
+    assert hyphen
+    assert len(hyphen) == len({eco for eco, _ in hyphen})
+    assert set(hyphen) == set(underscore)
+
+
 def test_resolve_rejects_coin_type_and_network(ens):
     with pytest.raises(ConflictingResolveOptionsError):
         ens.resolve("vitalik.eth", coin_type=60, ecosystem="base")
@@ -110,8 +130,18 @@ def test_resolve_local_network_coin_type(ens):
 
 
 def test_resolve_unknown_ape_network(ens):
-    with pytest.raises(ApeENSException, match="Unknown Ape ecosystem or network"):
+    with pytest.raises(UnknownNetworkError, match="Unknown Ape ecosystem or network"):
         ens.resolve("vitalik.eth", network="not-a-real-chain-xyz")
+
+
+def test_resolve_unknown_ecosystem(ens):
+    with pytest.raises(UnknownNetworkError):
+        ens.resolve("vitalik.eth", ecosystem="not-an-eco-xyz")
+
+
+def test_resolve_unknown_network_in_ecosystem(ens):
+    with pytest.raises(UnknownNetworkError):
+        ens.resolve("vitalik.eth", ecosystem="ethereum", network="not-a-net-xyz")
 
 
 def test_get_text(ens, mock_web3_ens):
