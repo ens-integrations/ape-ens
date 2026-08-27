@@ -35,23 +35,34 @@ def test_convert(converter, vitalik):
     assert actual == vitalik
 
 
-def test_convert_always_uses_eth_coin_type(converter, mock_web3_ens, mocker):
+def test_convert_on_local_uses_eth_coin_type(converter, mock_web3_ens, mocker):
     spy = mocker.spy(converter.ens, "resolve")
     converter.convert("vitalik.eth")
     spy.assert_called_with("vitalik.eth")
     mock_web3_ens.address.assert_called_with("vitalik.eth")
 
 
-def test_convert_when_connected_to_mainnet_fork(trick_network, converter, vitalik):
-    trick_network("mainnet_fork")
-    actual = converter.convert("vitalik.eth")
+def test_convert_follows_connected_l2(trick_network, converter, mock_web3_ens, vitalik):
+    with trick_network("mainnet", ecosystem="base"):
+        actual = converter.convert("vitalik.eth")
     assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=2147492101)
 
 
-def test_convert_when_connected_to_other_ecosystem_mainnet(trick_network, converter, vitalik):
-    trick_network("polygon", ecosystem="polygon")
-    actual = converter.convert("vitalik.eth")
+def test_convert_when_connected_to_mainnet_fork(trick_network, converter, mock_web3_ens, vitalik):
+    with trick_network("mainnet-fork"):
+        actual = converter.convert("vitalik.eth")
     assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth")
+
+
+def test_convert_when_connected_to_other_ecosystem_mainnet(
+    trick_network, converter, mock_web3_ens, vitalik
+):
+    with trick_network("mainnet", ecosystem="polygon"):
+        actual = converter.convert("vitalik.eth")
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=0x80000000 | 137)
 
 
 def test_convert_using_config_registry(project, converter, vitalik, accounts):

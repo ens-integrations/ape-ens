@@ -69,9 +69,9 @@ def ens_ecosystem_option(**kwargs):
 def ens_network_option(**kwargs):
     if "help" not in kwargs:
         kwargs["help"] = (
-            "Ape network for ENSIP-11 coin type (e.g. mainnet or base:mainnet). "
-            "A trailing :provider is ignored. "
-            "Not the same as --network, which selects the connected provider."
+            "Override ENS coin type using an Ape network (e.g. mainnet or base:mainnet). "
+            "A trailing :provider is ignored. Default follows --network (connected chain). "
+            "L2s use that chain's record, then default EVM, not ETH (60)."
         )
 
     return click.option("--ens-network", default=None, **kwargs)

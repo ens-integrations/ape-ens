@@ -16,7 +16,11 @@ from ape_ens.exceptions import (
     MissingRegistryError,
     UnknownNetworkError,
 )
-from ape_ens.utils.coin_type import ETH_COIN_TYPE, coin_type_from_chain_id
+from ape_ens.utils.coin_type import (
+    DEFAULT_EVM_COIN_TYPE,
+    ETH_COIN_TYPE,
+    coin_type_from_chain_id,
+)
 from ape_ens.utils.namehash import namehash
 
 if TYPE_CHECKING:
@@ -199,15 +203,18 @@ class ENS(ManagerAccessMixin):
 
         With web3.py >= 7.16.0, this uses the ENS Universal Resolver.
         Pass ``coin_type`` for ENSIP-9/11 multichain records (for example
-        ``0x80000000 | chain_id`` on EVM L2s). The default is ETH (coin type 60).
-        Ethereum L1 testnets (Sepolia, Holesky, …) also use coin type 60, not
-        an ENSIP-11 encoding of their chain ID. Conversion via ``ape.convert``
-        always uses the ETH address.
+        ``0x80000000 | chain_id`` on EVM L2s). Ethereum L1 (mainnet and
+        testnets) uses coin type 60.
+
+        When ``coin_type`` / ``ecosystem`` / ``network`` are omitted, coin type
+        follows the connected Ape network. L2s query that chain's record, then
+        the ENSIP-19 default EVM record (``0x80000000``), not the Ethereum
+        (60) record. Local sessions and disconnected use stay coin type 60.
+        ``ape.convert`` uses the same path. ENS RPC is still Ethereum mainnet.
 
         Alternatively, pass Ape ``ecosystem`` / ``network`` names (for example
-        ``ecosystem="base", network="mainnet"``) to select the coin type.
-        These do not change which RPC is used for ENS (always Ethereum
-        mainnet) and are not inferred from the connected provider.
+        ``ecosystem="base", network="mainnet"``) to select the coin type
+        explicitly. These do not change which RPC is used for ENS.
 
         Args:
             name (str): The name to resolve.
@@ -232,6 +239,8 @@ class ENS(ManagerAccessMixin):
 
         if ecosystem is not None or network is not None:
             coin_type = self._coin_type_from_ape_network(ecosystem, network)
+        elif coin_type is None:
+            coin_type = self._coin_type_from_connected_network()
 
         # ENSIP-9: coin type 60 is ETH, same as the default addr() path.
         if coin_type == 60:
@@ -259,6 +268,13 @@ class ENS(ManagerAccessMixin):
                 if coin_type is not None
                 else ens.address(name)
             )
+            # ENSIP-19: chain-specific miss → default EVM, never ETH (60).
+            if (
+                address is None
+                and coin_type is not None
+                and coin_type != DEFAULT_EVM_COIN_TYPE
+            ):
+                address = ens.address(name, coin_type=DEFAULT_EVM_COIN_TYPE)
         except (Web3RPCError, BadFunctionCallOutput) as err:
             raise MissingRegistryError(str(err))
 
@@ -266,6 +282,20 @@ class ENS(ManagerAccessMixin):
             self.local_registry[cache_key] = address
 
         return address
+
+    def _coin_type_from_connected_network(self) -> Optional[int]:
+        provider = self.network_manager.active_provider
+        if provider is None:
+            return None
+
+        net = provider.network
+        if net.is_local:
+            return None
+
+        try:
+            return self._coin_type_from_ape_network(net.ecosystem.name, net.name)
+        except ApeENSException:
+            return None
 
     def _coin_type_from_ape_network(
         self,

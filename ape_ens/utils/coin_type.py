@@ -1,5 +1,7 @@
 ETH_COIN_TYPE = 60
 EVM_COIN_TYPE_OFFSET = 0x80000000
+# ENSIP-19: chainId 0 — "any EVM" fallback when a chain-specific record is unset.
+DEFAULT_EVM_COIN_TYPE = EVM_COIN_TYPE_OFFSET
 
 # ENSIP-19: coin type 60 is the Ethereum address. L1 testnets (Sepolia, etc.)
 # use the same coin type, not ``0x80000000 | chain_id``.

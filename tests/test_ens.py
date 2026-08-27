@@ -8,6 +8,7 @@ from ape_ens.exceptions import (
     LocalNetworkCoinTypeError,
     UnknownNetworkError,
 )
+from ape_ens.utils.coin_type import DEFAULT_EVM_COIN_TYPE
 
 BASE_COIN_TYPE = 2147492101  # 0x80000000 | 8453
 BASE_SEPOLIA_COIN_TYPE = 0x80000000 | 84532
@@ -42,6 +43,35 @@ def test_resolve_coin_type_60_calls_default_address(ens, mock_web3_ens, vitalik)
     actual = ens.resolve("vitalik.eth", coin_type=60, use_cache=False)
     assert actual == vitalik
     mock_web3_ens.address.assert_called_with("vitalik.eth")
+
+
+def test_resolve_l2_falls_back_to_default_evm(ens, mock_web3_ens, address):
+    def get_address(name, coin_type=None):
+        if coin_type == DEFAULT_EVM_COIN_TYPE:
+            return address
+        return None
+
+    mock_web3_ens.address.side_effect = get_address
+    actual = ens.resolve("vitalik.eth", coin_type=BASE_COIN_TYPE, use_cache=False)
+    assert actual == address
+    mock_web3_ens.address.assert_any_call("vitalik.eth", coin_type=BASE_COIN_TYPE)
+    mock_web3_ens.address.assert_any_call("vitalik.eth", coin_type=DEFAULT_EVM_COIN_TYPE)
+
+
+def test_resolve_l2_does_not_fall_back_to_eth(ens, mock_web3_ens):
+    mock_web3_ens.address.side_effect = lambda name, coin_type=None: None
+    actual = ens.resolve("vitalik.eth", coin_type=BASE_COIN_TYPE, use_cache=False)
+    assert actual is None
+    assert mock_web3_ens.address.call_count == 2
+    for call in mock_web3_ens.address.call_args_list:
+        assert call.kwargs.get("coin_type") in (BASE_COIN_TYPE, DEFAULT_EVM_COIN_TYPE)
+
+
+def test_resolve_infers_connected_l2(ens, mock_web3_ens, vitalik, trick_network):
+    with trick_network("mainnet", ecosystem="base"):
+        actual = ens.resolve("vitalik.eth", use_cache=False)
+    assert actual == vitalik
+    mock_web3_ens.address.assert_called_with("vitalik.eth", coin_type=BASE_COIN_TYPE)
 
 
 def test_resolve_ape_network_ethereum_mainnet(ens, mock_web3_ens, vitalik):

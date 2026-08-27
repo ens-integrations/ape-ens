@@ -131,9 +131,12 @@ Resolve a non-ETH coin type (ENSIP-9/11). For EVM L2s this is `0x80000000 | chai
 ape ens resolve vitalik.eth --coin-type 2147492101
 ```
 
-Or use Ape ecosystem/network names instead of a raw coin type. `--network` is still Ape's **provider** connection (`ethereum:mainnet:node`); it does not select the ENS coin type:
+Or use Ape ecosystem/network names instead of a raw coin type. If you omit these,
+coin type follows the connected `--network` (ENSIP-19): the chain record, then the
+default EVM record (`0x80000000`), not the Ethereum (60) record. Ethereum L1 stays 60.
 
 ```shell
+ape ens resolve vitalik.eth --network base:mainnet
 ape ens resolve vitalik.eth --ens-ecosystem base --ens-network mainnet
 ape ens resolve vitalik.eth --ens-network base
 ```
@@ -151,9 +154,10 @@ print(vitalik)
 
 # Multichain (ENSIP-11): Base is 0x80000000 | 8453
 base_address = ens.resolve("vitalik.eth", coin_type=2147492101)
-# Same coin type via Ape names (does not follow the connected provider)
+# Same coin type via Ape names
 base_address = ens.resolve("vitalik.eth", ecosystem="base", network="mainnet")
 base_address = ens.resolve("vitalik.eth", network="base")
+# Omit ecosystem/network to follow the connected Ape network
 # Ethereum L1 testnets share coin type 60 (the ETH record), not ENSIP-11
 eth_address = ens.resolve("vitalik.eth", ecosystem="ethereum", network="sepolia")
 print(ens.get_text("vitalik.eth", "description"))
