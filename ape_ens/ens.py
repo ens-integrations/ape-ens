@@ -16,11 +16,7 @@ from ape_ens.exceptions import (
     MissingRegistryError,
     UnknownNetworkError,
 )
-from ape_ens.utils.coin_type import (
-    DEFAULT_EVM_COIN_TYPE,
-    ETH_COIN_TYPE,
-    coin_type_from_chain_id,
-)
+from ape_ens.utils.coin_type import DEFAULT_EVM_COIN_TYPE, ETH_COIN_TYPE, coin_type_from_chain_id
 from ape_ens.utils.namehash import namehash
 
 if TYPE_CHECKING:
