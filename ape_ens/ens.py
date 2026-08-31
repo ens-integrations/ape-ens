@@ -269,11 +269,7 @@ class ENS(ManagerAccessMixin):
                 else ens.address(name)
             )
             # ENSIP-19: chain-specific miss → default EVM, never ETH (60).
-            if (
-                address is None
-                and coin_type is not None
-                and coin_type != DEFAULT_EVM_COIN_TYPE
-            ):
+            if address is None and coin_type is not None and coin_type != DEFAULT_EVM_COIN_TYPE:
                 address = ens.address(name, coin_type=DEFAULT_EVM_COIN_TYPE)
         except (Web3RPCError, BadFunctionCallOutput) as err:
             raise MissingRegistryError(str(err))
@@ -345,13 +341,14 @@ class ENS(ManagerAccessMixin):
         if choice := self._parse_network_choice(network):
             return choice
 
+        matched_eco: Optional["EcosystemAPI"] = None
         try:
-            eco = self.network_manager.get_ecosystem(network)
+            matched_eco = self.network_manager.get_ecosystem(network)
         except NetworkError:
-            eco = None
+            pass
 
-        if eco is not None:
-            return eco.name, self._default_ens_network_name(eco)
+        if matched_eco is not None:
+            return matched_eco.name, self._default_ens_network_name(matched_eco)
 
         matches = self._match_network_name(network)
         if len(matches) == 1:
